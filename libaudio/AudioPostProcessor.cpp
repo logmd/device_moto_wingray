@@ -53,7 +53,7 @@ namespace android_audio_legacy {
 AudioPostProcessor::AudioPostProcessor() :
     mEcnsScratchBuf(0), mLogNumPoints(0),  mEcnsDlBuf(0), mEcnsDlBufSize(0), mEcnsThread(0)
 {
-    LOGD("%s",__FUNCTION__);
+    ALOGD("%s",__FUNCTION__);
 
     // One-time CTO Audio configuration
     mAudioMmEnvVar.cto_audio_mm_param_block_ptr              = HC_CTO_AUDIO_MM_PARAMETER_TABLE;
@@ -73,7 +73,7 @@ AudioPostProcessor::AudioPostProcessor() :
 AudioPostProcessor::~AudioPostProcessor()
 {
     if (mEcnsRunning) {
-        LOGD("%s",__FUNCTION__);
+        ALOGD("%s",__FUNCTION__);
         enableEcns(0);
     }
 }
@@ -127,20 +127,21 @@ uint32_t AudioPostProcessor::convRateToCto(uint32_t rate)
 void AudioPostProcessor::configMmAudio()
 {
     if (mAudioMmEnvVar.accy != CTO_AUDIO_MM_ACCY_INVALID) {
-        LOGD("Configure CTO Audio MM processing");
+        ALOGD("Configure CTO Audio MM processing");
         // fetch the corresponding runtime audio parameter
         api_cto_audio_mm_param_parser(&(mAudioMmEnvVar), (int16_t *)0, (int16_t *)0);
         // Initialize algorithm static memory
         api_cto_audio_mm_init(&(mAudioMmEnvVar), (int16_t *)0, (int16_t *)0);
     } else {
-        LOGD("CTO Audio MM processing is disabled.");
+        ALOGD("CTO Audio MM processing is disabled.");
     }
 }
 
 void AudioPostProcessor::enableEcns(int value)
 {
     if (mEcnsEnabled!=value) {
-        LOGD("enableEcns() new %08x old %08x)", value, mEcnsEnabled);
+        ALOGD("enableEcns() new %08x old %08x)", value, mEcnsEnabled);
+        mEcnsThread->broadcastReadCond();
         mEcnsThread->requestExitAndWait();
         stopEcns();
         cleanupEcns();
@@ -184,7 +185,7 @@ void AudioPostProcessor::setAudioDev(struct cpcap_audio_stream *outDev,
         stopEcns();
     }
 
-    LOGV("setAudioDev %d", outDev->id);
+    ALOGV("setAudioDev %d", outDev->id);
     if (mm_accy != mAudioMmEnvVar.accy) {
         mAudioMmEnvVar.accy = mm_accy;
         configMmAudio();
@@ -197,7 +198,7 @@ void AudioPostProcessor::setPlayAudioRate(int sampRate)
     uint32_t rate = convRateToCto(sampRate);
     Mutex::Autolock lock(mMmLock);
 
-    LOGD("AudioPostProcessor::setPlayAudioRate %d", sampRate);
+    ALOGD("AudioPostProcessor::setPlayAudioRate %d", sampRate);
     if (rate != mAudioMmEnvVar.sample_rate) {
         mAudioMmEnvVar.sample_rate = rate;
         configMmAudio();
@@ -223,12 +224,12 @@ int AudioPostProcessor::getEcnsRate (void)
 
 void AudioPostProcessor::initEcns(int rate, int bytes)
 {
-    LOGD("%s",__FUNCTION__);
+    ALOGD("%s",__FUNCTION__);
     CTO_AUDIO_USECASES_CTRL mode;
     Mutex::Autolock lock(mEcnsBufLock);
 
     if (rate != 8000 && rate != 16000) {
-        LOGW("Invalid rate for EC/NS, disabling");
+        ALOGW("Invalid rate for EC/NS, disabling");
         mEcnsEnabled = 0;
         mEcnsRunning = 0;
         return;
@@ -239,7 +240,7 @@ void AudioPostProcessor::initEcns(int rate, int bytes)
        // Offset to the 16K (WB) block in the coefficients file
        mode = CTO_AUDIO_USECASES_CTRL(mode + CTO_AUDIO_USECASE_WB_HANDSET);
     }
-    LOGD("%s for mode %d at %d size %d",__FUNCTION__, mode, mEcnsRate, bytes);
+    ALOGD("%s for mode %d at %d size %d",__FUNCTION__, mode, mEcnsRate, bytes);
     mEcnsCtrl.framesize = bytes/2;
     mEcnsCtrl.micFlag = 0; // 0- one mic.  1- dual mic. 2- three mic.
     mEcnsCtrl.digital_mode = (rate == 8000) ? 0 : 1;  // 8K or 16K
@@ -252,7 +253,7 @@ void AudioPostProcessor::initEcns(int rate, int bytes)
     FILE * fp = fopen("/system/etc/voip_aud_params.bin", "r");
     if (fp) {
         if (fread(mParamTable, sizeof(mParamTable), 1, fp) < 1) {
-            LOGE("Cannot read VOIP parameter file.  Disabling EC/NS.");
+            ALOGE("Cannot read VOIP parameter file.  Disabling EC/NS.");
             fclose(fp);
             mEcnsEnabled = 0;
             mEcnsRunning = 0;
@@ -261,7 +262,7 @@ void AudioPostProcessor::initEcns(int rate, int bytes)
         fclose(fp);
     }
     else {
-        LOGE("Cannot open VOIP parameter file.  Disabling EC/NS.");
+        ALOGE("Cannot open VOIP parameter file.  Disabling EC/NS.");
         mEcnsEnabled = 0;
         mEcnsRunning = 0;
         return;
@@ -281,7 +282,7 @@ void AudioPostProcessor::stopEcns (void)
 {
     AutoMutex lock(mEcnsBufLock);
     if (mEcnsRunning) {
-        LOGD("%s",__FUNCTION__);
+        ALOGD("%s",__FUNCTION__);
         mEcnsRunning = 0;
     }
 }
@@ -329,7 +330,7 @@ int AudioPostProcessor::writeDownlinkEcns(int fd, void * buffer, bool stereo,
     if (mEcnsEnabled && !mEcnsRunning) {
         long usecs = 20*1000;
         // Give the read thread a chance to catch up.
-        LOGV("%s: delay %d msecs for ec/ns to start",__FUNCTION__, (int)(usecs/1000));
+        ALOGV("%s: delay %d msecs for ec/ns to start",__FUNCTION__, (int)(usecs/1000));
         mEcnsBufLock.unlock();
         usleep(usecs);
         mEcnsBufLock.lock();
@@ -344,10 +345,10 @@ int AudioPostProcessor::writeDownlinkEcns(int fd, void * buffer, bool stereo,
         mEcnsOutFdLockp = fdLock;
         mEcnsOutStereo = stereo;
         if (mEcnsBufCond.waitRelative(mEcnsBufLock, seconds(1)) != NO_ERROR) {
-            LOGE("%s: Capture thread is stalled.", __FUNCTION__);
+            ALOGE("%s: Capture thread is stalled.", __FUNCTION__);
         }
         if (mEcnsOutBufSize != 0)
-            LOGD("%s: Buffer not consumed", __FUNCTION__);
+            ALOGD("%s: Buffer not consumed", __FUNCTION__);
         else
             written = bytes;  // All data consumed
     }
@@ -364,7 +365,7 @@ int AudioPostProcessor::read(int fd, void * buffer, int bytes, int rate)
     ssize_t ret;
     ret = ::read(fd, buffer, bytes);
     if (ret < 0)
-        LOGE("Error reading from audio in: %s", strerror(errno));
+        ALOGE("Error reading from audio in: %s", strerror(errno));
     return (int)ret;
 }
 
@@ -382,7 +383,7 @@ int AudioPostProcessor::applyUplinkEcns(void * buffer, int bytes, int rate)
     if (!mEcnsEnabled)
         return 0;
 
-    LOGV("%s %d bytes at %d Hz",__FUNCTION__, bytes, rate);
+    ALOGV("%s %d bytes at %d Hz",__FUNCTION__, bytes, rate);
     if (mEcnsEnabled && !mEcnsRunning) {
         initEcns(rate, bytes);
         onetime=true;
@@ -396,7 +397,7 @@ int AudioPostProcessor::applyUplinkEcns(void * buffer, int bytes, int rate)
     }
 
     if (!mEcnsRunning) {
-        LOGE("EC/NS failed to init, read returns.");
+        ALOGE("EC/NS failed to init, read returns.");
         if (mEcnsEnabled & AEC) {
             mEcnsBufCond.signal();
         }
@@ -426,7 +427,7 @@ int AudioPostProcessor::applyUplinkEcns(void * buffer, int bytes, int rate)
         if (mEcnsScratchBuf && mEcnsScratchBufSize) {
             dl_buf_bytes = mEcnsScratchBufSize > bytes ? bytes:mEcnsScratchBufSize;
             memcpy(dl_buf, mEcnsScratchBuf, dl_buf_bytes);
-            //LOGD("Took %d bytes from mEcnsScratchBuf", dl_buf_bytes);
+            //ALOGD("Took %d bytes from mEcnsScratchBuf", dl_buf_bytes);
             mEcnsScratchBufSize -= dl_buf_bytes;
             if (mEcnsScratchBufSize==0) {
                 // This should always be true.
@@ -446,22 +447,22 @@ int AudioPostProcessor::applyUplinkEcns(void * buffer, int bytes, int rate)
                        bytes_to_copy);
                 dl_buf_bytes += bytes_to_copy;
             }
-            //LOGD("Took %d bytes from mEcnsOutBuf.  Need %d more.", bytes_to_copy,
+            //ALOGD("Took %d bytes from mEcnsOutBuf.  Need %d more.", bytes_to_copy,
             //      bytes-dl_buf_bytes);
             mEcnsOutBufReadOffset += bytes_to_copy;
             if (mEcnsOutBufSize - mEcnsOutBufReadOffset < bytes) {
                 // We've depleted the output buffer, it's smaller than one uplink "frame".
                 // First take any unused data into scratch, then free the write thread.
                 if (mEcnsScratchBuf) {
-                    LOGE("Memleak - coding error");
+                    ALOGE("Memleak - coding error");
                     free(mEcnsScratchBuf);
                 }
                 if (mEcnsOutBufSize - mEcnsOutBufReadOffset > 0) {
                     if ((mEcnsScratchBuf=malloc(mEcnsOutBufSize - mEcnsOutBufReadOffset)) == 0) {
-                        LOGE("%s: Alloc failed, scratch data lost.",__FUNCTION__);
+                        ALOGE("%s: Alloc failed, scratch data lost.",__FUNCTION__);
                     } else {
                         mEcnsScratchBufSize = mEcnsOutBufSize - mEcnsOutBufReadOffset;
-                        //LOGD("....store %d bytes into scratch buf %p",
+                        //ALOGD("....store %d bytes into scratch buf %p",
                         //     mEcnsScratchBufSize, mEcnsScratchBuf);
                         memcpy(mEcnsScratchBuf,
                                (void *)((unsigned int)mEcnsOutBuf+mEcnsOutBufReadOffset),
@@ -471,12 +472,12 @@ int AudioPostProcessor::applyUplinkEcns(void * buffer, int bytes, int rate)
                 mEcnsOutBuf = 0;
                 mEcnsOutBufSize = 0;
                 mEcnsOutBufReadOffset = 0;
-                //LOGD("Signal write thread - need data.");
+                //ALOGD("Signal write thread - need data.");
                 mEcnsBufCond.signal();
             }
         }
 
-        LOGV_IF(dl_buf_bytes < bytes, "%s:EC/NS Starved for downlink data. have %d need %d.",
+        ALOGV_IF(dl_buf_bytes < bytes, "%s:EC/NS Starved for downlink data. have %d need %d.",
              __FUNCTION__,dl_buf_bytes, bytes);
 
         mEcnsBufLock.unlock();
@@ -538,8 +539,8 @@ void AudioPostProcessor::ecnsLogToRam (int bytes)
         if (!mLogBuf[0]) {
             mLogNumPoints = 0;
             mLogOffset = 0;
-            LOGE("EC/NS AUDIO LOGGER CONFIGURATION:");
-            LOGE("log enable %04X",
+            ALOGE("EC/NS AUDIO LOGGER CONFIGURATION:");
+            ALOGE("log enable %04X",
                 audioProfile[ECNS_LOG_ENABLE_OFFSET]);
             mkdir(ECNSLOGPATH, 00770);
             for (uint16_t i=1; i>0; i<<=1) {
@@ -547,14 +548,14 @@ void AudioPostProcessor::ecnsLogToRam (int bytes)
                    mLogNumPoints++;
                 }
             }
-            LOGE("Number of log points is %d.", mLogNumPoints);
+            ALOGE("Number of log points is %d.", mLogNumPoints);
             logp = mMotDatalog;
             mLogSize = 10*60*50*bytes;
             for (int i=0; i<mLogNumPoints; i++) {
                 // Allocate 10 minutes of logging per point
                 mLogBuf[i]=(char *)malloc(mLogSize);
                 if (!mLogBuf[i]) {
-                    LOGE("%s: Memory allocation failed.", __FUNCTION__);
+                    ALOGE("%s: Memory allocation failed.", __FUNCTION__);
                     for (int j=0; j<i; j++) {
                         free(mLogBuf[j]);
                         mLogBuf[j]=0;
@@ -572,7 +573,7 @@ void AudioPostProcessor::ecnsLogToRam (int bytes)
                 memcpy(&mLogBuf[i][mLogOffset], &logp[4], logp[2]*sizeof(uint16_t));
                 logp += 4+logp[2];
             } else {
-                LOGE("EC/NS logging enabled, but memory not allocated");
+                ALOGE("EC/NS logging enabled, but memory not allocated");
             }
         }
         mLogOffset += bytes;
@@ -588,11 +589,11 @@ void AudioPostProcessor::ecnsLogToFile()
             sprintf(fname, ECNSLOGPATH"/log-0x%04X.pcm", mLogPoint[i]);
             fp = fopen((const char *)fname, "w");
             if (fp) {
-                LOGE("Writing %d bytes to %s", mLogOffset, fname);
+                ALOGE("Writing %d bytes to %s", mLogOffset, fname);
                 fwrite(mLogBuf[i], mLogOffset, 1, fp);
                 fclose(fp);
             } else {
-                LOGE("Problem writing to %s", fname);
+                ALOGE("Problem writing to %s", fname);
             }
         }
     }
@@ -617,22 +618,22 @@ int AudioPostProcessor::read_dock_prop(char const *path)
     if (fd >= 0) {
         int amt = ::read(fd, buffer, SIZE-1);
         if (amt != SIZE-1) {
-	    LOGE("Incomplete dock property read, cannot validate dock");
+	    ALOGE("Incomplete dock property read, cannot validate dock");
 	    return -1;
         }
         spkr_dock_prop = strtoul(buffer, NULL, 16);
 	if (spkr_dock_prop <= 0) {
-	    LOGE("dock property conversion error");
+	    ALOGE("dock property conversion error");
 	    return -EINVAL;
         }
         close(fd);
-        LOGV("buffer = %s, spkr_dock_prop = 0x%lX", buffer, spkr_dock_prop);
+        ALOGV("buffer = %s, spkr_dock_prop = 0x%lX", buffer, spkr_dock_prop);
         spkr_dock_prop = spkr_dock_prop ^ basic_dock_prop;
-        LOGV("dock_prop returned = %lX", spkr_dock_prop);
+        ALOGV("dock_prop returned = %lX", spkr_dock_prop);
         return spkr_dock_prop;
     } else {
         if (already_warned == -1) {
-            LOGE("read_dock_prop failed to open %s\n", path);
+            ALOGE("read_dock_prop failed to open %s\n", path);
             already_warned = 1;
         }
         return -errno;
@@ -654,7 +655,7 @@ AudioPostProcessor::EcnsThread::~EcnsThread()
 int AudioPostProcessor::EcnsThread::readData(int fd, void * buffer, int bytes, int rate,
                                              AudioPostProcessor * pp)
 {
-    LOGV("%s: read %d bytes at %d rate", __FUNCTION__, bytes, rate);
+    ALOGV("%s: read %d bytes at %d rate", __FUNCTION__, bytes, rate);
     Mutex::Autolock lock(mEcnsReadLock);
     mProcessor = pp;
     mFd = fd;
@@ -662,12 +663,13 @@ int AudioPostProcessor::EcnsThread::readData(int fd, void * buffer, int bytes, i
     mReadSize = bytes;
     mRate = rate;
     if (!mIsRunning) {
-        LOGD("Create (run) the ECNS thread");
+        ALOGD("Create (run) the ECNS thread");
         run("AudioPostProcessor::EcnsThread", ANDROID_PRIORITY_HIGHEST);
         mIsRunning = true;
     }
+    mEcnsReadCond.signal();
     if (mEcnsReadCond.waitRelative(mEcnsReadLock, seconds(1)) != NO_ERROR) {
-        LOGE("%s: ECNS thread is stalled.", __FUNCTION__);
+        ALOGE("%s: ECNS thread is stalled.", __FUNCTION__);
         mClientBuf = 0;
         return -1;
     }
@@ -688,7 +690,7 @@ bool AudioPostProcessor::EcnsThread::threadLoop()
     bool half_done = false;
     int ecnsStatus = 0;
 
-    LOGD("%s: Enter thread loop size %d rate %d", __FUNCTION__,
+    ALOGD("%s: Enter thread loop size %d rate %d", __FUNCTION__,
                                           mReadSize, mRate);
 
     mReadBuf = (int16_t *) malloc(mReadSize);
@@ -706,12 +708,23 @@ bool AudioPostProcessor::EcnsThread::threadLoop()
         if(exitPending())
             goto error;
         if (ret1 <= 0 || ret2 <= 0) {
-            LOGE("%s: Problem reading.", __FUNCTION__);
+            ALOGE("%s: Problem reading.", __FUNCTION__);
             goto error;
         }
         GETTIMEOFDAY(&mtv3, NULL);
         mEcnsReadLock.lock();
         ecnsStatus = mProcessor->applyUplinkEcns(mReadBuf, mReadSize, mRate);
+
+        // wait for client buffer if not ready
+        if (!mClientBuf) {
+            if(exitPending()) {
+                mEcnsReadLock.unlock();
+                goto error;
+            }
+            if (mEcnsReadCond.waitRelative(mEcnsReadLock, seconds(1)) != NO_ERROR) {
+                ALOGE("%s: client stalled.", __FUNCTION__);
+            }
+        }
         if (mClientBuf && mReadSize) {
             // Give the buffer to the client.
             memcpy(mClientBuf, mReadBuf, mReadSize);
@@ -719,11 +732,11 @@ bool AudioPostProcessor::EcnsThread::threadLoop()
             ret1 = ::read(mFd, mReadBuf, mReadSize/2);
             half_done = true;
             GETTIMEOFDAY(&mtv7, NULL);
-            mEcnsReadCond.signal();
             mClientBuf = 0;
+            mEcnsReadCond.signal();
         } else {
             half_done = false;
-            LOGV("%s: Read overflow (ECNS sanity preserved)", __FUNCTION__);
+            ALOGV("%s: Read overflow (ECNS sanity preserved)", __FUNCTION__);
         }
         mEcnsReadLock.unlock();
         GETTIMEOFDAY(&mtv8, NULL);
@@ -748,31 +761,31 @@ bool AudioPostProcessor::EcnsThread::threadLoop()
                 large_jitter++;
             else
                 medium_jitter++;
-            LOGD("jitter: usecs = %d should be 20000", usecs);
-            LOGD("Point 1 (      start): %03d.%06d:", (int)mtv1.tv_sec, (int)mtv1.tv_usec);
-            LOGD("Point 2 (after read1): %03d.%06d:", (int)mtv2.tv_sec, (int)mtv2.tv_usec);
-            LOGD("Point 3 (after read2): %03d.%06d:", (int)mtv3.tv_sec, (int)mtv3.tv_usec);
-            LOGD("Point 4 (before ECNS): %03d.%06d:", (int)mtv4.tv_sec, (int)mtv4.tv_usec);
-            LOGD("Point 5 (after  ECNS): %03d.%06d:", (int)mtv5.tv_sec, (int)mtv5.tv_usec);
-            LOGD("Point 6 (after write): %03d.%06d:", (int)mtv6.tv_sec, (int)mtv6.tv_usec);
-            LOGD("Point 7 (before sgnl): %03d.%06d:", (int)mtv7.tv_sec, (int)mtv7.tv_usec);
-            LOGD("Point 8 (after unlck): %03d.%06d:", (int)mtv8.tv_sec, (int)mtv8.tv_usec);
+            ALOGD("jitter: usecs = %d should be 20000", usecs);
+            ALOGD("Point 1 (      start): %03d.%06d:", (int)mtv1.tv_sec, (int)mtv1.tv_usec);
+            ALOGD("Point 2 (after read1): %03d.%06d:", (int)mtv2.tv_sec, (int)mtv2.tv_usec);
+            ALOGD("Point 3 (after read2): %03d.%06d:", (int)mtv3.tv_sec, (int)mtv3.tv_usec);
+            ALOGD("Point 4 (before ECNS): %03d.%06d:", (int)mtv4.tv_sec, (int)mtv4.tv_usec);
+            ALOGD("Point 5 (after  ECNS): %03d.%06d:", (int)mtv5.tv_sec, (int)mtv5.tv_usec);
+            ALOGD("Point 6 (after write): %03d.%06d:", (int)mtv6.tv_sec, (int)mtv6.tv_usec);
+            ALOGD("Point 7 (before sgnl): %03d.%06d:", (int)mtv7.tv_sec, (int)mtv7.tv_usec);
+            ALOGD("Point 8 (after unlck): %03d.%06d:", (int)mtv8.tv_sec, (int)mtv8.tv_usec);
         } else if ((usecs > 22000) || (usecs < 18000)) {
             small_jitter++;
-            LOGD("jitter: usecs = %d should be 20000", usecs);
+            ALOGD("jitter: usecs = %d should be 20000", usecs);
         }
         if ((count % 500)== 0) {
-            LOGD("====================================== Statistics ===========================");
-            LOGD(" After %d seconds:", count/50);
-            LOGD(" Small jitters-  %d (%02.5f%%)", small_jitter, ((float)small_jitter)*100/count);
-            LOGD(" Medium jitters- %d (%02.5f%%)", medium_jitter, ((float)medium_jitter)*100/count);
-            LOGD(" Large jitters-  %d (%02.5f%%)", large_jitter, ((float)large_jitter)*100/count);
-            LOGD("=============================================================================");
+            ALOGD("====================================== Statistics ===========================");
+            ALOGD(" After %d seconds:", count/50);
+            ALOGD(" Small jitters-  %d (%02.5f%%)", small_jitter, ((float)small_jitter)*100/count);
+            ALOGD(" Medium jitters- %d (%02.5f%%)", medium_jitter, ((float)medium_jitter)*100/count);
+            ALOGD(" Large jitters-  %d (%02.5f%%)", large_jitter, ((float)large_jitter)*100/count);
+            ALOGD("=============================================================================");
         }
 #endif
     }
 error:
-    LOGD("%s: Exit thread loop, enabled = %d", __FUNCTION__,mProcessor->isEcnsEnabled());
+    ALOGD("%s: Exit thread loop, enabled = %d", __FUNCTION__,mProcessor->isEcnsEnabled());
     if (mReadBuf) {
         free (mReadBuf);
         mReadBuf = 0;

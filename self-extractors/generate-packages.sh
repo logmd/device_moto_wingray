@@ -14,8 +14,23 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-ZIP=tervigon-ota-221846.zip
-BUILD=iml40b
+# 221846 = IML40B
+# 236517 = IML70C
+# 237179 = IML73
+# 237867 = IML74B
+# 238432 = IML74E
+# 238649 = IML74G
+# 239410 = IML74K
+# 257829 = IMM30B
+# 262866 = IMM30D
+# 299849 = IMM76D
+# end ics-mr1
+BRANCH=ics-mr1
+if test $BRANCH=ics-mr1
+then
+  ZIP=tervigon-ota-299849.zip
+  BUILD=imm76d
+fi # ics-mr1
 ROOTDEVICE=stingray
 DEVICE=wingray
 MANUFACTURER=moto

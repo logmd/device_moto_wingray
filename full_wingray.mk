@@ -25,9 +25,9 @@ PRODUCT_PACKAGES := \
 	LiveWallpapersPicker \
 	VisualizationWallpapers
 
-# Camera
-PRODUCT_PACKAGES += \
-    Camera
+# Set wifi-only before it's set by generic_no_telephony.mk
+PRODUCT_PROPERTY_OVERRIDES += \
+        ro.carrier=wifi-only
 
 # Inherit from those products. Most specific first.
 $(call inherit-product, $(SRC_TARGET_DIR)/product/full_base.mk)
@@ -37,9 +37,6 @@ $(call inherit-product, device/moto/wingray/device.mk)
 
 # Discard inherited values and use our own instead.
 PRODUCT_NAME := full_wingray
-PRODUCT_BRAND := motorola
 PRODUCT_DEVICE := wingray
 PRODUCT_BRAND := Android
 PRODUCT_MODEL := Full Android on Wingray
-
-
